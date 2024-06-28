@@ -93,7 +93,7 @@ def main(sub, layout):
         raw,
         prep_params,
         raw.get_montage(),
-        ransac = False, # due to high memory usage
+        ransac = True, 
         random_state = int(sub)
         )
     prep.fit()
