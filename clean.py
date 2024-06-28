@@ -63,17 +63,17 @@ def main(sub, layout):
     # compute ICA components from highpass filtered copy of data
     # because ICA performs poorly with low frequency drift,
     # but we still want high frequencies to capture noise components
-    ica = ICA(n_components = 20, random_state = 0)
+    ica = ICA(n_components = 60, random_state = 0)
     raw = raw.load_data().filter(l_freq = 1., h_freq = None)
     epo = mne.Epochs(raw, events, tmin = 0, tmax = new_dur, baseline = None)
     ica.fit(epo, picks = 'eeg')
-    # and exclude ICA components that are correlated with EOG or EMG
-    emg_indices, emg_scores = ica.find_bads_muscle(epo)
-    eog_indices, eog_scores = ica.find_bads_eog(epo, threshold = 1.96)
-    exclude = np.unique(eog_indices + emg_indices).tolist()
-    epochs = ica.apply(epochs, exclude = exclude)
     del epo
     del raw
+    # and exclude ICA components that are correlated with EOG or EMG
+    emg_indices, emg_scores = ica.find_bads_muscle(epochs)
+    eog_indices, eog_scores = ica.find_bads_eog(epochs, threshold = 1.96)
+    exclude = np.unique(eog_indices + emg_indices).tolist()
+    epochs = ica.apply(epochs, exclude = exclude)
 
     # reject trials that exceed (arbitrary) voltage threshold
     epochs = epochs.drop_bad(reject = dict(eeg = CUTOFF))
