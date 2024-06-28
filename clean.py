@@ -70,7 +70,7 @@ def main(sub, layout):
     del epo
     del raw
     # and exclude ICA components that are correlated with EOG or EMG
-    emg_indices, emg_scores = ica.find_bads_muscle(epochs)
+    emg_indices, emg_scores = ica.find_bads_muscle(epochs, threshold = .75)
     eog_indices, eog_scores = ica.find_bads_eog(epochs, threshold = 1.96)
     exclude = np.unique(eog_indices + emg_indices).tolist()
     epochs = ica.apply(epochs, exclude = exclude)
