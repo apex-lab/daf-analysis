@@ -9,14 +9,29 @@ from pyprep.prep_pipeline import PrepPipeline
 # BIDS utilities
 from mne_bids import BIDSPath, read_raw_bids
 from util.io.bids import DataSink
+from util.envelope import compute_envelope
 from bids import BIDSLayout
-# speech stuff
-from parselmouth import Sound
 
 BIDS_ROOT = 'bids_dataset'
 DERIV_WORKFLOW = 'PREP'
 DERIV_ROOT = op.join(BIDS_ROOT, 'derivatives')
 TASK = 'daf'
+
+def add_envelope_channels(raw, chan):
+    # compute amplitude envelope and spectral event onsets
+    aud, t = raw.get_data(picks = [chan], return_times = True)
+    aud = np.squeeze(aud)
+    envelope, onsets = compute_envelope(aud, raw.info['sfreq'])
+    # create dummy Raw object so we can marge them back into raw
+    info = raw.copy().pick(['egg', 'audio']).info
+    new_chans = mne.io.RawArray(np.stack([envelope, onsets]), info)
+    new_chans = new_chans.rename_channels({
+        'egg': '%s_envelope'%chan,
+        'audio': '%s_onsets'%chan
+        })
+    # merge and return
+    raw = raw.add_channels([new_chans])
+    return raw
 
 def main(sub, layout):
     '''
@@ -48,26 +63,14 @@ def main(sub, layout):
         )[0]
     evs = pd.read_csv(f, sep = '\t')
 
-    ## find good filter settings for EGG
-    audio = raw.copy().pick(['egg'])
-    audio = audio.load_data()
-    # get min and max pitch across all trials
-    min_pitch = np.inf
-    max_pitch = -np.inf
-    for i in range(evs.shape[0]):
-        tmin, tmax = evs.onset.iloc[i], evs.onset.iloc[i] + evs.duration.iloc[i]
-        aud, t = audio.get_data(tmin = tmin, tmax = tmax, return_times = True)
-        aud = np.squeeze(aud)
-        snd = Sound(aud, sampling_frequency = audio.info['sfreq'])
-        pitch = snd.to_pitch().selected_array['frequency']
-        min_pitch = np.min([pitch[pitch > 0.].min(), min_pitch])
-        max_pitch = np.max([pitch[pitch > 0.].max(), max_pitch])
-
-    # filter EGG before downsampling for PREP
-    raw.load_data()
-    raw.filter(min_pitch - 10., max_pitch + 10., picks = ['egg'])
-    # and audio
-    raw.filter(20., 5000/2, picks = ['audio'])
+    raw.load_data() # load data and highpass audio to match EGG
+    df = layout.get(subject = sub, task = TASK, suffix = 'channels')[0].get_df()
+    egg_lfreq = df[df.name == 'egg']['low_cutoff'].iloc[0]
+    raw = raw.filter(egg_lfreq, None, picks = ['audio'])
+    # add amplitude envelope and spectral event onsets for EGG/audio channels
+    # (must be done before downsampling for PREP b/c requires high frequencies)
+    raw = add_envelope_channels(raw, 'audio')
+    raw = add_envelope_channels(raw, 'egg')
 
     # re-reference eye electrodes to become bipolar EOG
     def ref(dat):
@@ -78,18 +81,19 @@ def main(sub, layout):
     raw = raw.set_channel_types({'leog': 'eog', 'reog': 'eog'})
 
     # run PREP pipeline (notch, exclude bad chans, and re-reference)
-    raw = raw.resample(5000.) # downsample for PREP as a workaround for
+    raw = raw.resample(1000.) # downsample for PREP as a workaround for
     lf = raw.info['line_freq'] # pyprep Issue #109 on GitHub:
     prep_params = {            # https://github.com/sappelhoff/pyprep/issues/109
         "ref_chs": "eeg",
         "reref_chs": "eeg",
         "line_freqs": np.arange(lf, 200., lf)
     }
+    raw = raw.set_eeg_reference('average')
     prep = PrepPipeline(
         raw,
         prep_params,
         raw.get_montage(),
-        ransac = True,
+        ransac = False, # due to high memory usage
         random_state = int(sub)
         )
     prep.fit()
@@ -101,7 +105,7 @@ def main(sub, layout):
 
     # create bipolar jaw EMG
     raw = raw.apply_function(ref, picks = ['FT9', 'TP9'], channel_wise = False)
-    raw = raw.apply_function(ref, picks = ['FT10', 'TP10'], channel_wise = False)
+    raw = raw.apply_function(ref, picks = ['FT10', 'TP10'], channel_wise=False)
     raw = raw.rename_channels({'FT9': 'lemg', 'FT10': 'remg'})
     raw = raw.set_channel_types({'lemg': 'emg', 'remg': 'emg'})
 
