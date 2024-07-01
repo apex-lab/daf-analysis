@@ -54,6 +54,11 @@ def main(sub, layout):
     raw = read_raw_bids(bids_path, verbose = False)
     raw.info['bads'] = [] #################### or PREP will fail later!
     # this is workaround for https://github.com/sappelhoff/pyprep/issues/146
+    if not np.isfinite(raw.info['chs'][0]['loc'][:3]).any():
+        print('\nMissing channel locations for sub-%s...'%sub)
+        print('Filling in with standard 10-20 template.\n')        
+        dig = mne.channels.make_standard_montage('standard_1020')
+        raw = raw.set_montage(dig)
     ## load experiment events
     f = layout.get(
         return_type = 'file',
@@ -93,7 +98,7 @@ def main(sub, layout):
         raw,
         prep_params,
         raw.get_montage(),
-        ransac = True, 
+        ransac = True,
         random_state = int(sub)
         )
     prep.fit()
