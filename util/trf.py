@@ -36,14 +36,6 @@ def get_data(epochs, condition):
     leakage. Cross-validation should be done across conditions.
     '''
     X = epochs[condition].get_data(FEAT_NAMES)
-    delays = epochs[condition].metadata.delay
-    for i, d in enumerate(delays):
-        # delay audio to match what subject (rather than mic) hears
-        delay_samps = np.round(d * epochs.info['sfreq']).astype(int)
-        x = X[i, :2, :]
-        x = np.roll(x, delay_samps, axis = 1)
-        x[:, :delay_samps] = 0
-        X[i, :2, :] = x # audio features
     X = Scaler(scalings = 'median').fit_transform(X)
     y = epochs[condition].get_data(['csd']) # current source density of EEG
     y = Scaler(scalings = 'median').fit_transform(y)
@@ -67,7 +59,9 @@ def xcorr_lag(rf, epochs, condition, feat_index = -1):
     Returns
     ------------
     maxlag: float
-        The lag of the maximum cross-correlation, in seconds.
+        The lag of the maximum cross-correlation, in seconds. Sign is such that
+        a positive value denotes that the prediction of `rf` is delayed relative
+        to the time series it is trying to predict.
     '''
     # load data and pull out feature to predict
     features, eeg = get_data(epochs, condition)
