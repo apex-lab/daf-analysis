@@ -206,12 +206,12 @@ def xcorr_lag(rf, epochs, condition, feat_index = -1):
     # and return lag of maximum cross correlation
     return lags[np.argmax(corrs)]
 
-def to_evokeds(rf, epochs):
+def to_evokeds(rf, epochs, ch_type = 'csd'):
     '''
     pulls filters (i.e. decoding weights) and patterns (i.e. encoding weights)
     out of a temporal response function model
     '''
-    info = epochs.copy().pick(['csd']).info
+    info = epochs.copy().pick([ch_type]).info
     assert(rf.patterns_.shape[0] == 1)
     patterns = mne.EvokedArray(rf.patterns_[0, :, :], info, tmin = rf.tmin)
     filters = mne.EvokedArray(rf.coef_[0, :, :], info, tmin = rf.tmin)

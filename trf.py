@@ -15,6 +15,7 @@ from mne.decoding import ReceptiveField
 import mne
 import re
 import json
+import argparse
 
 from util.io.bids import DataSink
 from bids import BIDSLayout
@@ -30,6 +31,11 @@ TMIN, TMAX = -.5, .5
 
 
 def main(sub, layout):
+
+    np.random.seed(int(sub))
+
+    if sub in layout.get_subjects(scope = DERIV_WORKFLOW):
+        return # subject already processed, don't run anything
 
     print('\nStarting sub-%s...'%sub)
 
@@ -138,6 +144,7 @@ def main(sub, layout):
         )
         H0.to_csv(fpath, sep = '\t', index = False)
 
+
     # save cross-validation scores
     fpath = sink.get_path(
         subject = sub,
@@ -151,6 +158,17 @@ def main(sub, layout):
 
 
     assert(feat == 'egg_onsets') # check to make sure this was last feature fit
+    # save EMG model for EGG onsets
+    _, emg_patterns = to_evokeds(rf_emg, epochs, ch_type = 'emg')
+    fpath = sink.get_path(
+        subject = sub,
+        task = TASK,
+        desc = 'EMGPatterns',
+        suffix = 'ave',
+        extension = '.fif.gz'
+    )
+    emg_patterns.save(fpath, overwrite = True)
+
     # then get lag between actual and predicted onsets in post-adaption block
     lags = dict()
     lags['pre->post'] = xcorr_lag(rf, epochs, 'random2', feat_index = -1)
@@ -158,6 +176,7 @@ def main(sub, layout):
     print('Fitting model on post-adaption block...')
     features, eeg, emg = get_data(epochs, 'random2')
     rf = rf.fit(eeg, features[:, :, -1][:, :, np.newaxis])
+    rf_emg = clone(rf).fit(emg, features[:, :, -1][:, :, np.newaxis])
     # and get lag for pre-adaption block
     lags['post->pre'] = xcorr_lag(rf, epochs, 'random1', feat_index = -1)
     # then save both lags
@@ -180,6 +199,15 @@ def main(sub, layout):
         extension = '.fif.gz'
     )
     patterns.save(fpath, overwrite = True)
+    _, emg_patterns = to_evokeds(rf_emg, epochs, ch_type = 'emg')
+    fpath = sink.get_path(
+        subject = sub,
+        task = TASK,
+        desc = 'EMGPatternsPost',
+        suffix = 'ave',
+        extension = '.fif.gz'
+    )
+    emg_patterns.save(fpath, overwrite = True)
 
     # that's it!
     print('Finished sub-%s.\n'%sub)
@@ -188,11 +216,12 @@ def main(sub, layout):
 
 if __name__ == "__main__":
     layout = BIDSLayout(BIDS_ROOT, derivatives = True)
-    subs = layout.get_subjects(scope = SOURCE_WORKFLOW)
-    subs.sort(key = int)
-    already_done = layout.get_subjects(scope = DERIV_WORKFLOW)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('sub', type = str)
+    args = parser.parse_args()
+    if args.sub == 'all':
+        subs = layout.get_subjects(scope = SOURCE_WORKFLOW)
+    else:
+        subs = ['%02d'%int(args.sub)]
     for sub in subs:
-        if sub in already_done:
-            continue
-        else:
-            main(sub, layout)
+        main(sub, layout)
